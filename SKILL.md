@@ -23,10 +23,11 @@ Extracts all posts from LinkedIn's saved items page and generates an insights re
 
 ```
 Open LinkedIn Saves page
-  → Scroll and extract all posts
-    → Deduplicate
-      → Analyze with Claude
-        → Generate Markdown report
+  -> Scroll and extract all posts
+    -> Deduplicate
+      -> Discover categories from content
+        -> Analyze with Claude
+          -> Generate Markdown report
 ```
 
 ---
@@ -37,7 +38,7 @@ Open LinkedIn Saves page
 
 1. Call `mcp__chrome-devtools__list_pages` to see open tabs
 2. If a LinkedIn tab exists, select it with `mcp__chrome-devtools__select_page`
-3. If not, open a new tab and navigate: `mcp__chrome-devtools__navigate_page` → `https://www.linkedin.com/my-items/saved-posts/`
+3. If not, open a new tab and navigate: `mcp__chrome-devtools__navigate_page` to `https://www.linkedin.com/my-items/saved-posts/`
 4. Take a screenshot to confirm the page loaded correctly
 5. **Checkpoint**: "LinkedIn Saves page visible. Starting extraction."
 
@@ -52,7 +53,6 @@ Run `mcp__chrome-devtools__evaluate_script` with:
 ```javascript
 (() => {
   const results = [];
-  // Try multiple possible containers for saved posts
   const containers = document.querySelectorAll(
     '.scaffold-finite-scroll__content > div, ' +
     '[data-finite-scroll-hotspot-bottom] ~ div > div, ' +
@@ -61,21 +61,17 @@ Run `mcp__chrome-devtools__evaluate_script` with:
   );
 
   containers.forEach(el => {
-    // Author name
     const authorEl = el.querySelector(
       '.update-components-actor__name, ' +
       '.feed-shared-actor__name, ' +
       '.update-components-actor__title'
     );
-    // Post text
     const contentEl = el.querySelector(
       '.feed-shared-update-v2__description, ' +
       '.update-components-text, ' +
       '.break-words span[dir="ltr"]'
     );
-    // Post URL
     const linkEl = el.querySelector('a[href*="/posts/"], a[href*="activity"]');
-    // Author profile URL
     const authorLinkEl = el.querySelector('a[href*="/in/"]');
 
     if (contentEl && contentEl.innerText.trim().length > 20) {
@@ -88,7 +84,6 @@ Run `mcp__chrome-devtools__evaluate_script` with:
     }
   });
 
-  // Deduplicate by content fingerprint (first 100 chars)
   const seen = new Set();
   return results.filter(p => {
     const key = p.content.slice(0, 100);
@@ -112,7 +107,7 @@ Call `mcp__chrome-devtools__wait_for` with selector `.feed-shared-update-v2` or 
 
 **2d. Check for new content**
 
-Compare post count before/after scroll. If count didn't increase after 3 scrolls → stop loop.
+Compare post count before/after scroll. If count didn't increase after 3 scrolls, stop loop.
 
 **Progress update**: After every 10 posts extracted, report: "Extracted X posts so far..."
 
@@ -122,13 +117,35 @@ Compare post count before/after scroll. If count didn't increase after 3 scrolls
 
 Merge all extracted posts across scroll iterations. Remove duplicates by matching the first 100 characters of content. Report final count: "Total: X unique posts extracted from Y authors."
 
-### 4. Categorize Posts (Chunked — Parallel Agents)
+### 4. Discover Categories (Dynamic)
 
-**If total posts ≤ 150** : analyze directly in memory, skip to step 4b.
+**This step generates categories tailored to the user's actual saved content — no hardcoded taxonomy.**
 
-**If total posts > 150** : use parallel agents to categorize at scale.
+**4a. Sample the content**
 
-**4a. Split into batches of 50**
+Take a random sample of ~50 posts (or all posts if total is 50 or less). Read through them to identify recurring themes, topics, and professional interests.
+
+**4b. Generate 8-12 categories**
+
+Based on the sample, propose 8-12 categories that:
+- Reflect the actual topics present in the saved posts
+- Are specific enough to be useful (not "business" or "marketing" — more like "outbound-automation" or "product-led-growth")
+- Are mutually exclusive (a post should clearly fit in one category)
+- Include an `other` catch-all for outliers
+
+**4c. Present categories for confirmation**
+
+Show the proposed categories to the user with a 1-line description each. Ask: "These categories look good? I can adjust before running the full analysis."
+
+Wait for user confirmation before proceeding. If the user adjusts, update the category list accordingly.
+
+### 5. Categorize Posts (Chunked — Parallel Agents)
+
+**If total posts are 150 or less**: analyze directly in memory, skip to step 5b.
+
+**If total posts are more than 150**: use parallel agents to categorize at scale.
+
+**5a. Split into batches of 50**
 
 Save the full posts array to a local JSON file:
 ```
@@ -142,13 +159,13 @@ batches/batch_02.json  (posts 51-100)
 ...
 ```
 
-**4b. Launch parallel categorization agents**
+**5b. Launch parallel categorization agents**
 
 For each pair of batches, launch a background Agent (subagent_type: general-purpose, model: sonnet) with this prompt:
 
 > Read batch files [batch_XX.json] and [batch_YY.json]. For each post, assign:
-> - `category`: one of `claude-code-agents`, `ai-seo`, `outbound-automation`, `content-systems`, `gtm-revenue`, `linkedin-personal-brand`, `ai-tools-general`, `copywriting-messaging`, `product-marketing`, `other`
-> - `freshness`: `evergreen`, `current`, or `outdated` (from a 2026 B2B perspective)
+> - `category`: one of [INSERT THE CONFIRMED CATEGORY LIST HERE]
+> - `freshness`: `evergreen`, `current`, or `outdated` (from a current-year perspective)
 > - `actionability`: `high`, `medium`, or `low`
 > - `key_insight`: 1 sentence max — the most concrete, actionable takeaway
 >
@@ -156,7 +173,7 @@ For each pair of batches, launch a background Agent (subagent_type: general-purp
 
 Launch all agents in parallel. Wait for all to complete.
 
-**4c. Aggregate results**
+**5c. Aggregate results**
 
 Use Node.js to merge all `analyzed/batch_*.json` files into a single dataset:
 ```javascript
@@ -168,7 +185,7 @@ fs.writeFileSync('./all_analyzed.json', JSON.stringify(all, null, 2));
 console.log('Total:', all.length);
 ```
 
-**4d. Compute stats**
+**5d. Compute stats**
 
 ```javascript
 const all = JSON.parse(fs.readFileSync('./all_analyzed.json'));
@@ -200,95 +217,97 @@ for (const p of highValue) hvAuthors[p.author] = (hvAuthors[p.author] || 0) + 1;
 const topHVAuthors = Object.entries(hvAuthors).sort((a,b) => b[1]-a[1]).slice(0, 10);
 ```
 
-### 5. Generate Report
+### 6. Generate Report
 
 Produce a Markdown report saved to `rapport-linkedin-saves-{YYYY-MM-DD}.md` with this structure:
 
 ```markdown
-# Analyse LinkedIn Saves — {YYYY-MM-DD}
+# LinkedIn Saves Analysis — {YYYY-MM-DD}
 
-## Vue d'ensemble
+## Overview
 
-| Métrique | Valeur |
-|----------|--------|
-| Posts analysés | N |
-| Auteurs uniques | X |
-| Posts à forte valeur (high actionability + non-outdated) | N |
-| Posts obsolètes à archiver | N |
-| Catégorie dominante | [catégorie] (N posts) |
+| Metric | Value |
+|--------|-------|
+| Posts analyzed | N |
+| Unique authors | X |
+| High-value posts (high actionability + not outdated) | N |
+| Outdated posts to archive | N |
+| Dominant category | [category] (N posts) |
 
-**Distribution des catégories :**
+**Category distribution:**
 
-| Catégorie | Posts | High-value |
-|-----------|-------|-----------|
-| [pour chaque catégorie, triée par volume décroissant] | N | N |
+| Category | Posts | High-value |
+|----------|-------|-----------|
+| [for each category, sorted by volume descending] | N | N |
 
-**Freshness :** Evergreen: N% / Current: N% / Outdated: N%
-
----
-
-## Catégorie par catégorie
-
-Pour chaque catégorie ayant ≥ 5 posts, une section avec :
-
-### [Nom de la catégorie] (N posts, N high-value)
-
-> **Signal** : [1 phrase sur ce que cette catégorie révèle des intérêts/habitudes de l'utilisateur]
-
-**Top insights actionnables :**
-
-- **[Auteur]** : [key_insight]
-- **[Auteur]** : [key_insight]
-- ... (top 6-8 posts high-value de cette catégorie)
+**Freshness:** Evergreen: N% / Current: N% / Outdated: N%
 
 ---
 
-## Posts outdated — À archiver (N posts)
+## Category by category
 
-| Thème | Posts | Pourquoi |
-|-------|-------|----------|
-| [regrouper par raison d'obsolescence] | N | [explication] |
+For each category with 5+ posts:
+
+### [Category name] (N posts, N high-value)
+
+> **Signal**: [1 sentence on what this category reveals about the user's interests]
+
+**Top actionable insights:**
+
+- **[Author]**: [key_insight]
+- **[Author]**: [key_insight]
+- ... (top 6-8 high-value posts from this category)
 
 ---
 
-## Top auteurs
+## Outdated posts — To archive (N posts)
 
-**Par volume de saves :**
+| Theme | Posts | Why |
+|-------|-------|-----|
+| [group by reason for obsolescence] | N | [explanation] |
 
-| Auteur | Posts sauvés |
+---
+
+## Top authors
+
+**By save volume:**
+
+| Author | Saved posts |
 |--------|-------------|
 | [top 10] | N |
 
-**Par posts high-value :**
+**By high-value posts:**
 
-| Auteur | Posts high-value | Territoire |
+| Author | High-value posts | Territory |
 |--------|-----------------|-----------|
-| [top 10] | N | [catégorie dominante] |
+| [top 10] | N | [dominant category] |
 
 ---
 
-## Matrice d'implémentation
+## Implementation matrix
 
-### Implémenter maintenant
-[3-5 insights high-value + current, avec action concrète]
+### Implement now
+[3-5 high-value + current insights, with concrete action]
 
-### Implémenter dans 30 jours
-[3-5 insights plus structurants, nécessitant plus de temps]
+### Implement in 30 days
+[3-5 more structural insights, requiring more time]
 
-### À utiliser comme preuves / arguments
-[2-3 stats ou faits marquants extraits des posts, utilisables en contenu ou vente]
+### Use as proof points / arguments
+[2-3 notable stats or facts from posts, usable in content or sales]
 
 ---
 
-## Signal de positionnement
+## Positioning signal
 
-[3-5 phrases : ce que l'ensemble des saves révèle sur le profil de veille, les convictions, et le territoire de l'utilisateur. Ce n'est pas un résumé — c'est une lecture du profil intellectuel derrière les saves.]
+[3-5 sentences: what the saves as a whole reveal about the user's watchlist profile, convictions, and territory. Not a summary — a reading of the intellectual profile behind the saves.]
 ```
 
-### 6. Save and Deliver Report
+**Report language**: Use the language parameter (default: fr). If fr, write the report in French. If en, write in English. The template above shows the English structure — adapt headers and content to the chosen language.
+
+### 7. Save and Deliver Report
 
 1. Write the report to `rapport-linkedin-saves-{YYYY-MM-DD}.md` in the working directory using the Write tool
-2. **Done**: "Rapport généré : rapport-linkedin-saves-{DATE}.md — N posts analysés, N high-value, N à archiver."
+2. **Done**: "Report generated: rapport-linkedin-saves-{DATE}.md — N posts analyzed, N high-value, N to archive."
 
 ---
 
@@ -321,4 +340,5 @@ max_posts:  # Maximum posts to extract (default: all)
 - **No API key needed** — analysis runs with your existing Claude subscription
 - **Privacy** — posts are processed in memory only, never sent to external services
 - **LinkedIn changes** — if selectors break, Claude uses screenshots to visually identify the new DOM structure and adapts
-- **Volume** — scales to 1000+ posts via parallel agent chunking (batches de 50, agents lancés en parallèle)
+- **Volume** — scales to 1000+ posts via parallel agent chunking (batches of 50, agents launched in parallel)
+- **Categories are dynamic** — generated from your actual saved content, not hardcoded. Every user gets categories that match their interests.
