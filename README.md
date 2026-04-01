@@ -58,12 +58,12 @@ claude
 
 ## Ce que tu obtiens
 
-- **Catégorisation post par post** (10 catégories : AI SEO, Outbound Automation, Content Systems, etc.)
-- **Freshness** : evergreen / current / outdated — tu sais ce qui est encore pertinent en 2026
+- **Catégorisation post par post** 
+- **Freshness** : evergreen / current / outdated, tu sais ce qui est encore pertinent en 2026
 - **Actionnabilité** : high / medium / low — priorise ce que tu dois implémenter
-- **Top insights par catégorie** — les pépites extraites de chaque thème
+- **Top insights par catégorie** les pépites extraites de chaque thème
 - **Matrice d'implémentation** : quoi faire maintenant vs dans 30 jours
-- **Signal de positionnement** : ce que tes saves révèlent sur ton profil intellectuel
+- **Signal de positionnement** : ce que tes saves révèlent sur ton profil
 
 ---
 
