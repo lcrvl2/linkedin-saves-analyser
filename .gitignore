@@ -1,0 +1,9 @@
+# Output data (generated per-run)
+posts.json
+all_analyzed.json
+batches/
+analyzed/
+rapport-*.md
+
+# Intermediate/debug files
+*.txt
